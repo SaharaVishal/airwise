@@ -1,0 +1,21 @@
+{
+  "name": "airwise",
+  "version": "1.0.0",
+  "description": "AirWise — a GenAI Urban Air Quality Assistant that builds low-exposure, low-emission daily routines from live AQI data, with quantified impact for every suggestion.",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0"
+  }
+}
