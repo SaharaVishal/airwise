@@ -19,9 +19,13 @@ function createApp({ config = {}, fetchImpl = globalThis.fetch } = {}) {
   const cfg = {
     geminiApiKey: config.geminiApiKey ?? process.env.GEMINI_API_KEY,
     geminiModel: config.geminiModel ?? process.env.GEMINI_MODEL ?? 'gemini-flash-latest',
+    // Tried in order when the primary model is overloaded (HTTP 503/429) or times out.
+    geminiFallbackModels: (config.geminiFallbackModels ?? process.env.GEMINI_FALLBACK_MODELS ?? 'gemini-3.5-flash,gemini-flash-lite-latest')
+      .split(',').map((m) => m.trim()).filter(Boolean),
     googleApiKey: config.googleApiKey ?? process.env.GOOGLE_MAPS_API_KEY,
     rateLimitPerMin: config.rateLimitPerMin ?? 30
   };
+  const geminiModels = [cfg.geminiModel, ...cfg.geminiFallbackModels];
   const aqCache = new TTLCache({ ttlMs: 10 * 60_000 });
   const geoCache = new TTLCache({ ttlMs: 24 * 3600_000 });
 
@@ -96,7 +100,7 @@ function createApp({ config = {}, fetchImpl = globalThis.fetch } = {}) {
     const impacts = computeImpacts(profile, aq);
     const plan = await generatePlan({
       profile, aq, impacts, place: placeName(req.body.place),
-      apiKey: cfg.geminiApiKey, model: cfg.geminiModel, fetchImpl
+      apiKey: cfg.geminiApiKey, model: geminiModels, fetchImpl
     });
     const { hourly, ...aqLite } = aq;
     res.json({ airQuality: { ...aqLite, hourly: hourly.slice(0, 24) }, impacts, plan });
@@ -110,7 +114,7 @@ function createApp({ config = {}, fetchImpl = globalThis.fetch } = {}) {
     const impacts = computeImpacts(profile, aq);
     res.json(await answerQuestion({
       question, profile, aq, impacts, place: placeName(req.body.place),
-      apiKey: cfg.geminiApiKey, model: cfg.geminiModel, fetchImpl
+      apiKey: cfg.geminiApiKey, model: geminiModels, fetchImpl
     }));
   }));
 

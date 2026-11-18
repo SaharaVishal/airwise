@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const { categorize, findCleanestWindows, dominantOf } = require('../src/aqi');
 const { inhaledDose, commuteSwitchImpact, suggestAlternativeMode, computeImpacts } = require('../src/impact');
 const { validateProfile, validateCoords, validateQuestion, ValidationError } = require('../src/validate');
-const { fallbackPlan, isValidPlan, buildContext, stripFences } = require('../src/gemini');
+const { fallbackPlan, isValidPlan, buildContext, stripFences, callGemini, isRetryable } = require('../src/gemini');
 const { TTLCache, coordKey } = require('../src/cache');
 
 const sampleAq = {
@@ -181,5 +181,40 @@ describe('cache', () => {
   });
   test('coordKey rounds to ~1km', () => {
     assert.equal(coordKey(28.61391, 77.20902), '28.61,77.21');
+  });
+});
+
+describe('Gemini failover', () => {
+  const ok = (text) => ({ ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }) });
+  const fail = (status) => ({ ok: false, status, text: async () => '{"error":"busy"}' });
+  const quiet = (fn) => async () => {
+    const warn = console.warn;
+    console.warn = () => {};
+    try { await fn(); } finally { console.warn = warn; }
+  };
+
+  test('falls over to the next model when the primary is overloaded (503)', quiet(async () => {
+    const seen = [];
+    const fetchImpl = async (url) => {
+      seen.push(url);
+      return url.includes('model-a') ? fail(503) : ok('hello');
+    };
+    const text = await callGemini({ apiKey: 'k', model: ['model-a', 'model-b'], contents: [], fetchImpl, backoffMs: 1 });
+    assert.equal(text, 'hello');
+    assert.equal(seen.length, 2);
+  }));
+
+  test('does not retry on auth errors', quiet(async () => {
+    let calls = 0;
+    const fetchImpl = async () => { calls++; return fail(401); };
+    await assert.rejects(callGemini({ apiKey: 'k', model: ['a', 'b'], contents: [], fetchImpl, backoffMs: 1 }), /401/);
+    assert.equal(calls, 1);
+  }));
+
+  test('classifies retryable errors', () => {
+    assert.equal(isRetryable({ status: 503 }), true);
+    assert.equal(isRetryable({ status: 429 }), true);
+    assert.equal(isRetryable({ status: 400 }), false);
+    assert.equal(isRetryable(new Error('ETIMEDOUT')), true);
   });
 });

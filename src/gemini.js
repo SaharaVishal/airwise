@@ -85,7 +85,7 @@ function buildContext(profile, aq, impacts, place) {
 
 const fmt = (v) => (typeof v === 'number' ? Math.round(v) : 'n/a');
 
-async function callGemini({ apiKey, model, contents, schema, fetchImpl, timeoutMs = 20000 }) {
+async function callGeminiOnce({ apiKey, model, contents, schema, fetchImpl, timeoutMs }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -108,7 +108,7 @@ async function callGemini({ apiKey, model, contents, schema, fetchImpl, timeoutM
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => '');
-      throw new Error(`Gemini HTTP ${res.status}: ${detail.slice(0, 200)}`);
+      throw Object.assign(new Error(`Gemini HTTP ${res.status} (${model}): ${detail.slice(0, 200)}`), { status: res.status });
     }
     const data = await res.json();
     const text = data.candidates?.[0]?.content?.parts?.filter((p) => !p.thought).map((p) => p.text || '').join('') || '';
@@ -117,6 +117,39 @@ async function callGemini({ apiKey, model, contents, schema, fetchImpl, timeoutM
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Overloaded, rate-limited, missing model or network trouble: worth trying again / another model. */
+function isRetryable(err) {
+  if (!err.status) return true; // timeout, DNS, ECONNRESET, ETIMEDOUT...
+  return [404, 408, 429, 500, 502, 503, 504].includes(err.status);
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Call Gemini with automatic failover across models.
+ * `model` may be a single name or an ordered list (primary first). Each model gets one
+ * attempt; on 503/429/timeouts we back off briefly and move to the next model, all
+ * inside one overall deadline so the user is never left waiting indefinitely.
+ */
+async function callGemini({ model, deadlineMs = 55000, perAttemptMs = 25000, backoffMs = 800, ...rest }) {
+  const models = [...new Set([].concat(model).filter(Boolean))];
+  const deadline = Date.now() + deadlineMs;
+  let lastErr;
+  for (let i = 0; i < models.length; i++) {
+    const remaining = deadline - Date.now();
+    if (remaining < 2000) break;
+    try {
+      return await callGeminiOnce({ ...rest, model: models[i], timeoutMs: Math.min(perAttemptMs, remaining) });
+    } catch (err) {
+      lastErr = err;
+      console.warn(`Gemini attempt ${i + 1}/${models.length} failed: ${err.message}`);
+      if (!isRetryable(err)) break;
+      if (i < models.length - 1) await sleep(backoffMs * (i + 1));
+    }
+  }
+  throw lastErr || new Error('Gemini unavailable');
 }
 
 /** Some models wrap JSON in ``` fences despite responseMimeType; strip them defensively. */
@@ -225,4 +258,4 @@ async function answerQuestion({ question, profile, aq, impacts, place, apiKey, m
   return { answer: text.trim(), generatedBy: 'gemini' };
 }
 
-module.exports = { generatePlan, answerQuestion, fallbackPlan, buildContext, isValidPlan, stripFences, PLAN_SCHEMA };
+module.exports = { generatePlan, answerQuestion, fallbackPlan, buildContext, isValidPlan, stripFences, callGemini, isRetryable, PLAN_SCHEMA };

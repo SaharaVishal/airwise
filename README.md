@@ -25,7 +25,7 @@ Express API (Cloud Run)
 |---|---|
 | **No hallucinated numbers** | Impact figures are computed in code (`src/impact.js`). Gemini is told to cite only these numbers. |
 | **Reliable output** | Gemini `responseSchema` structured JSON, validated server-side before rendering. |
-| **Always functional** | Rule-based fallback plan when the key is missing or the API errors. Open-Meteo fallback for AQ data. |
+| **Always functional** | Automatic Gemini model failover with backoff when a model is overloaded (503/429) or times out, then a rule-based plan as the last resort. Open-Meteo fallback for AQ data. |
 | **Security** | API keys stay server-side (sent as headers, not in URLs). Helmet with a strict CSP. Rate limiting, 10 kb body cap, whitelist validation of every field, prompt-injection fencing for user questions, and no `innerHTML` (model output rendered as text only). Errors never leak stack traces. Non-root container. |
 | **Efficiency** | ~1 km coordinate-rounded TTL cache for AQ (10 min) and geocoding (24 h). Only 3 runtime dependencies. No frontend framework or build step. |
 | **Accessibility** | Semantic landmarks, skip link, labelled controls, ARIA combobox with keyboard navigation, `aria-live` results, AQI shown as text and not by colour alone, 44 px touch targets, dark mode, `prefers-reduced-motion`. Hindi output option. |
@@ -51,7 +51,7 @@ It works without any key too, using rule-based plans and Open-Meteo data.
 
 ## Test
 ```bash
-npm test     # 34 tests: unit + API integration (all upstream calls mocked)
+npm test     # 40 tests: unit + API integration (all upstream calls mocked)
 ```
 
 ## Deploy to Google Cloud Run
