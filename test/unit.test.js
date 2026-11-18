@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const { categorize, findCleanestWindows, dominantOf } = require('../src/aqi');
 const { inhaledDose, commuteSwitchImpact, suggestAlternativeMode, computeImpacts } = require('../src/impact');
 const { validateProfile, validateCoords, validateQuestion, ValidationError } = require('../src/validate');
-const { fallbackPlan, isValidPlan, buildContext } = require('../src/gemini');
+const { fallbackPlan, isValidPlan, buildContext, stripFences } = require('../src/gemini');
 const { TTLCache, coordKey } = require('../src/cache');
 
 const sampleAq = {
@@ -144,6 +144,24 @@ describe('gemini helpers', () => {
     assert.match(ctx, /US AQI 280/);
     assert.match(ctx, /PM2\.5 180/);
     assert.match(ctx, /Delhi/);
+  });
+
+  test('fallback never says exercise outdoors when even the best hour is unhealthy', () => {
+    const plan = fallbackPlan(profile, sampleAq, impacts);
+    const step = plan.routine.find((r) => r.time === 'Exercise');
+    assert.ok(step);
+    assert.match(step.action, /indoors/);
+  });
+
+  test('fallback only mentions running a purifier if the household has one', () => {
+    const night = (p) => fallbackPlan(p, sampleAq, impacts).routine.find((r) => r.time === 'Night').action;
+    assert.doesNotMatch(night(profile), /Run the purifier/);
+    assert.match(night({ ...profile, hasPurifier: true }), /Run the purifier/);
+  });
+
+  test('stripFences removes markdown code fences', () => {
+    assert.equal(stripFences('```json\n{"a":1}\n```'), '{"a":1}');
+    assert.equal(stripFences('{"a":1}'), '{"a":1}');
   });
 
   test('isValidPlan rejects malformed output', () => {

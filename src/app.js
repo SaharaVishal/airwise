@@ -18,7 +18,7 @@ const { TTLCache, coordKey } = require('./cache');
 function createApp({ config = {}, fetchImpl = globalThis.fetch } = {}) {
   const cfg = {
     geminiApiKey: config.geminiApiKey ?? process.env.GEMINI_API_KEY,
-    geminiModel: config.geminiModel ?? process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
+    geminiModel: config.geminiModel ?? process.env.GEMINI_MODEL ?? 'gemini-flash-latest',
     googleApiKey: config.googleApiKey ?? process.env.GOOGLE_MAPS_API_KEY,
     rateLimitPerMin: config.rateLimitPerMin ?? 30
   };

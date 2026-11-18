@@ -98,7 +98,7 @@ async function callGemini({ apiKey, model, contents, schema, fetchImpl, timeoutM
         contents,
         generationConfig: {
           temperature: 0.4,
-          maxOutputTokens: 2048,
+          maxOutputTokens: 8192, // newer Flash models spend part of this budget on thinking
           ...(schema ? { responseMimeType: 'application/json', responseSchema: schema } : {})
         },
         safetySettings: [
@@ -106,9 +106,12 @@ async function callGemini({ apiKey, model, contents, schema, fetchImpl, timeoutM
         ]
       })
     });
-    if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`Gemini HTTP ${res.status}: ${detail.slice(0, 200)}`);
+    }
     const data = await res.json();
-    const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || '';
+    const text = data.candidates?.[0]?.content?.parts?.filter((p) => !p.thought).map((p) => p.text || '').join('') || '';
     if (!text) throw new Error('Empty Gemini response');
     return text;
   } finally {
@@ -116,11 +119,34 @@ async function callGemini({ apiKey, model, contents, schema, fetchImpl, timeoutM
   }
 }
 
+/** Some models wrap JSON in ``` fences despite responseMimeType; strip them defensively. */
+function stripFences(text) {
+  return text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+}
+
 function isValidPlan(p) {
   return Boolean(
     p && typeof p.headline === 'string' && typeof p.summary === 'string' &&
     Array.isArray(p.routine) && Array.isArray(p.indoorHacks) && Array.isArray(p.sustainableSwaps)
   );
+}
+
+/** Exercise advice that never contradicts the AQI it is based on. */
+function exerciseStep(profile, best, bestTime) {
+  const bestAqi = best?.aqi;
+  if (!profile.outdoorExerciseMinutes) {
+    return typeof bestAqi === 'number' && bestAqi <= 150
+      ? { time: bestTime, action: 'Air out the house for 10 minutes, then close up again.', why: `Forecast cleanest hour (AQI ${bestAqi}).` }
+      : { time: 'All day', action: 'Keep windows shut; even the cleanest hour is unhealthy today.', why: `Best forecast AQI is ${bestAqi ?? 'unknown'}.` };
+  }
+  if (typeof bestAqi === 'number' && bestAqi <= 150) {
+    return { time: bestTime, action: `Do your ${profile.outdoorExerciseMinutes} min outdoor exercise at this time.`, why: `Forecast cleanest hour (AQI ${bestAqi}).` };
+  }
+  return {
+    time: 'Exercise',
+    action: `Move your ${profile.outdoorExerciseMinutes} min workout indoors (yoga, skipping, bodyweight circuits).`,
+    why: `Even the cleanest hour today is AQI ${bestAqi ?? 'unknown'}, and hard breathing multiplies the dose.`
+  };
 }
 
 /** Rule-based plan used when Gemini is unavailable. */
@@ -135,9 +161,15 @@ function fallbackPlan(profile, aq, impacts) {
     routine: [
       { time: '6:00–9:00', action: 'Keep windows closed; smog is usually trapped near the ground in winter mornings.', why: 'Temperature inversions concentrate PM2.5 at dawn.' },
       { time: 'Commute', action: profile.commuteMode === 'wfh' ? 'Stay indoors and work from your cleanest room.' : 'Wear a fitted N95 and keep vehicle windows up with recirculation on.', why: impacts.find((i) => i.id === 'mask')?.metric || 'Reduces inhaled PM2.5.' },
-      { time: bestTime, action: profile.outdoorExerciseMinutes ? `Do your ${profile.outdoorExerciseMinutes} min exercise now, or indoors if AQI > 150.` : 'Air out the house briefly if AQI is lowest now.', why: `Forecast cleanest hour (AQI ${best?.aqi ?? 'n/a'}).` },
+      exerciseStep(profile, best, bestTime),
       { time: 'Evening', action: 'Cook with lid on and run the exhaust fan.', why: 'Cooking is a major indoor PM2.5 source.' },
-      { time: 'Night', action: 'Run purifier in the bedroom with door closed.', why: 'You spend ~8 h breathing bedroom air.' }
+      {
+        time: 'Night',
+        action: profile.hasPurifier
+          ? 'Run the purifier on high in the bedroom with the door closed.'
+          : 'Sleep with windows and door shut; a DIY box-fan filter in the bedroom helps most here.',
+        why: 'You spend about 8 hours breathing bedroom air.'
+      }
     ],
     indoorHacks: [
       { tip: 'DIY purifier: tape a MERV-13 filter to a box fan', impact: 'Can cut room PM2.5 by roughly half in under an hour', cost: 'low' },
@@ -167,7 +199,7 @@ async function generatePlan({ profile, aq, impacts, place, apiKey, model, fetchI
       schema: PLAN_SCHEMA,
       contents: [{ role: 'user', parts: [{ text: `${buildContext(profile, aq, impacts, place)}\n\nCreate today's personalised clean-air plan. ${lang}` }] }]
     });
-    const plan = JSON.parse(text);
+    const plan = JSON.parse(stripFences(text));
     if (!isValidPlan(plan)) throw new Error('Invalid plan shape');
     return { ...plan, generatedBy: 'gemini' };
   } catch (err) {
@@ -193,4 +225,4 @@ async function answerQuestion({ question, profile, aq, impacts, place, apiKey, m
   return { answer: text.trim(), generatedBy: 'gemini' };
 }
 
-module.exports = { generatePlan, answerQuestion, fallbackPlan, buildContext, isValidPlan, PLAN_SCHEMA };
+module.exports = { generatePlan, answerQuestion, fallbackPlan, buildContext, isValidPlan, stripFences, PLAN_SCHEMA };

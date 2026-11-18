@@ -60,7 +60,7 @@ gcloud run deploy airwise \
   --source . \
   --region asia-south1 \
   --allow-unauthenticated \
-  --set-env-vars GEMINI_API_KEY=YOUR_KEY,GEMINI_MODEL=gemini-2.5-flash
+  --set-env-vars GEMINI_API_KEY=YOUR_KEY,GEMINI_MODEL=gemini-flash-latest
 # optional: add GOOGLE_MAPS_API_KEY=... with the Air Quality API enabled
 ```
 For production, store keys in **Secret Manager** (`--set-secrets GEMINI_API_KEY=gemini-key:latest`).

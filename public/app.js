@@ -156,7 +156,7 @@
     $('pollutants').replaceChildren(...items.map(([k, v, u]) => el('div', {}, [el('dt', { text: k }), el('dd', { text: fmt(v, u) })])));
 
     const hours = (aq.hourly || []).filter((h) => typeof h.aqi === 'number').slice(0, 24);
-    const max = Math.max(100, ...hours.map((h) => h.aqi));
+    const max = Math.max(300, ...hours.map((h) => h.aqi)); // fixed scale so 160 vs 300 looks different
     $('forecast').replaceChildren(
       ...hours.map((h, i) =>
         el('div', {
